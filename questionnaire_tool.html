@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>问卷自动计分与分类查看</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f7fb; --panel: #ffffff; --panel-2: #eef3f9; --text: #172b4d;
+      --muted: #667085; --line: #d9e2ef; --primary: #356ae6; --primary-2: #e8efff;
+      --danger: #b42318; --danger-bg: #fff0ee; --warn: #9a6700; --warn-bg: #fff8df;
+      --ok: #027a48; --ok-bg: #e9f8f0; --shadow: 0 12px 30px rgba(31, 56, 88, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #101722; --panel: #172231; --panel-2: #223044; --text: #edf4ff;
+        --muted: #a7b4c8; --line: #34445a; --primary: #83a8ff; --primary-2: #263b67;
+        --danger: #ffb4aa; --danger-bg: #4b2527; --warn: #ffd66b; --warn-bg: #4b3a17;
+        --ok: #7ce5ad; --ok-bg: #153e2c; --shadow: 0 12px 30px rgba(0, 0, 0, .25); }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    .app-shell { max-width: 1640px; margin: 0 auto; padding: 24px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    .brand h1 { margin: 0; font-size: 25px; letter-spacing: -.02em; }
+    .brand p { margin: 4px 0 0; color: var(--muted); }
+    .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .language-control { display: flex; flex-direction: column; gap: 2px; min-width: 190px; }
+    .language-control small { color: var(--muted); font-size: 11px; line-height: 1.25; }
+    .upload-label, .btn { border: 1px solid var(--line); border-radius: 9px; padding: 9px 13px; background: var(--panel); color: var(--text); font-weight: 650; }
+    .upload-label, .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .btn:hover, .upload-label:hover { filter: brightness(.96); }
+    input[type=file] { display: none; }
+    .privacy { color: var(--ok); background: var(--ok-bg); border: 1px solid color-mix(in srgb, var(--ok) 25%, transparent); padding: 8px 12px; border-radius: 999px; font-size: 12px; }
+    .notice { border-radius: 10px; padding: 11px 14px; margin: 0 0 16px; border: 1px solid var(--line); background: var(--panel); }
+    .notice.error { color: var(--danger); background: var(--danger-bg); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+    .notice.warn { color: var(--warn); background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+    .notice.ok { color: var(--ok); background: var(--ok-bg); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+    .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+    .sidebar, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+    .sidebar { padding: 15px; position: sticky; top: 14px; }
+    .sidebar h3 { margin: 2px 0 13px; font-size: 14px; }
+    .sidebar details { border-top: 1px solid var(--line); padding: 11px 0; }
+    .sidebar details:first-of-type { border-top: 0; }
+    .sidebar summary { cursor: pointer; font-weight: 750; color: var(--text); margin-bottom: 9px; }
+    .field { margin: 0 0 14px; }
+    .field label { display: block; font-weight: 650; margin-bottom: 5px; }
+    .field small, .muted { color: var(--muted); }
+    select, input[type=number], input[type=text], textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; background: var(--panel); }
+    select[multiple] { min-height: 86px; }
+    .range-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .check { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; }
+    .check input { margin-top: 4px; accent-color: var(--primary); }
+    .main { min-width: 0; }
+    .tabs { display: flex; gap: 6px; overflow-x: auto; padding: 5px; background: var(--panel-2); border-radius: 11px; margin-bottom: 15px; }
+    .tab { white-space: nowrap; border: 0; background: transparent; padding: 9px 12px; border-radius: 8px; color: var(--muted); font-weight: 650; }
+    .tab.active { background: var(--panel); color: var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    .panel { padding: 18px; overflow: hidden; }
+    .panel h2 { margin: 0 0 5px; font-size: 19px; }
+    .panel h3 { margin: 22px 0 9px; font-size: 15px; }
+    .panel-subtitle { margin: 0 0 15px; color: var(--muted); }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .stat { border: 1px solid var(--line); background: var(--panel-2); padding: 12px; border-radius: 11px; }
+    .stat b { display: block; font-size: 22px; margin-top: 2px; }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .table-wrap { overflow: auto; max-height: 64vh; border: 1px solid var(--line); border-radius: 9px; }
+    .viz-controls { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 10px; align-items: end; margin-bottom: 16px; }
+    .viz-controls .field { margin: 0; }
+    .viz-chart { width: 100%; overflow: hidden; }
+    .viz-chart svg { display: block; width: 100%; height: auto; min-height: 300px; }
+    .viz-chart text { fill: var(--text); font-size: 12px; }
+    .viz-chart .gridline { stroke: var(--line); stroke-width: 1; }
+    .viz-chart .axisline { stroke: var(--muted); stroke-width: 1; }
+    .viz-chart .bar { fill: var(--primary); opacity: .82; }
+    .viz-chart .line { fill: none; stroke: var(--primary); stroke-width: 3; }
+    .viz-chart .point { fill: var(--ok); stroke: var(--panel); stroke-width: 2; }
+    .viz-caption { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+    @media (max-width: 900px) { .viz-controls { grid-template-columns: repeat(2, minmax(140px, 1fr)); } }
+    @media (max-width: 520px) { .viz-controls { grid-template-columns: 1fr; } }
+    table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 760px; font-size: 13px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { position: sticky; top: 0; z-index: 2; background: var(--panel-2); font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    td.score { text-align: right; font-variant-numeric: tabular-nums; }
+    td.cell-red { background: var(--danger-bg); color: var(--danger); font-weight: 700; }
+    td.cell-yellow { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
+    td.cell-purple { background: #f2ebff; color: #6941c6; font-weight: 700; }
+    @media (prefers-color-scheme: dark) { td.cell-purple { background: #35285b; color: #d4bbff; } }
+    .person-link { border: 0; padding: 0; color: var(--primary); background: transparent; font-weight: 700; }
+    .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 700; margin-left: 5px; }
+    .badge.red { color: var(--danger); background: var(--danger-bg); }
+    .badge.yellow { color: var(--warn); background: var(--warn-bg); }
+    .badge.ok { color: var(--ok); background: var(--ok-bg); }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+    .toolbar-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+    .empty { text-align: center; padding: 50px 20px; color: var(--muted); }
+    .detail { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--panel-2); }
+    .detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 14px; }
+    .detail-item { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dashed var(--line); padding: 5px 0; }
+    .detail-item span:first-child { color: var(--muted); }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .card { border: 1px solid var(--line); border-radius: 11px; padding: 14px; background: var(--panel-2); }
+    .card h3 { margin-top: 0; }
+    .result { margin-top: 12px; }
+    textarea#config-json { min-height: 460px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 9px; }
+    .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    @media (max-width: 900px) { .app-shell { padding: 14px; } .topbar { align-items: flex-start; flex-direction: column; } .layout { grid-template-columns: 1fr; } .sidebar { position: static; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .two-col, .detail-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <h1 id="app-title">问卷自动计分与分类查看</h1>
+        <p id="app-subtitle">Psicometria e Personalità · BFI-44 / BIS-BAS / QAS-Short / EPQ-R 等</p>
+      </div>
+      <div class="top-actions">
+        <span class="privacy" id="privacy-note">🔒 数据只在本浏览器内存中处理，不会上传</span>
+        <div class="language-control"><select id="language-select" aria-label="Language"><option value="zh">中文</option><option value="en">English</option><option value="it">Italiano</option></select><small id="language-help">Select a language. The interface updates immediately; your data stays in this browser.</small></div>
+        <label class="upload-label"><span id="upload-label-text">上传 Excel</span><input id="file-input" type="file" accept=".xlsx,.xls,.csv"></label>
+        <button class="btn" id="reset-btn" type="button">清空数据</button>
+      </div>
+    </header>
+    <div id="notice"></div>
+    <div class="layout">
+      <aside class="sidebar">
+        <h3 id="filter-title">筛选条件</h3>
+        <div id="filter-fields">
+          <div class="empty">上传数据后启用筛选</div>
+        </div>
+      </aside>
+      <main class="main">
+        <nav id="tabs" class="tabs" aria-label="页面导航">
+          <button class="tab active" data-tab="all" type="button">全部量表</button>
+          <button class="tab" data-tab="stats" type="button">统计分析</button>
+          <button class="tab" data-tab="rules" type="button">计分规则</button>
+        </nav>
+        <section id="content" class="panel"></section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+  "use strict";
+
+  const COL = {
+    gender: 0, school: 1, region: 2, province: 3, moveStart: 4, cfu: 9,
+    bfiStart: 10, bisStart: 54, studyStart: 78, spatialStart: 98,
+    exploreStart: 106, orientStart: 116, epqStart: 129, memoryStart: 177,
+    attention: 184, epq1: 129
+  };
+  const GENDER = { 1: "男", 2: "女", 3: "其他" };
+  const SCHOOL = { 1: "类型1", 2: "类型2", 3: "类型3" };
+  const REGION = { 1: "Abruzzo", 2: "Basilicata", 3: "Calabria", 4: "Campania", 5: "Emilia-Romagna", 6: "Friuli-VG", 7: "Lazio", 8: "Liguria", 9: "Lombardia", 10: "Marche", 11: "Molise", 12: "Piemonte", 13: "Puglia", 14: "Sardegna", 15: "Sicilia", 16: "Toscana", 17: "Trentino-AA", 18: "Umbria", 19: "Valle d’Aosta", 20: "Veneto", 21: "Abroad/Other" };
+  const I18N = {
+    zh: {
+      title: "问卷自动计分与分类查看", subtitle: "Psicometria e Personalità · 本地浏览器分析工具", privacy: "🔒 数据只在本浏览器内存中处理，不会上传", upload: "上传 Excel", reset: "清空数据", filters: "筛选条件",
+      overview: "总览", scales: "量表分析", stats: "统计分析", rules: "计分规则", apply: "应用筛选", clear: "清除筛选", help: "选择条件后点击“应用筛选”", noData: "等待上传数据", uploadHint: "请上传原始 Excel。数据不会离开当前浏览器。",
+      id: "个人 ID", gender: "性别", school: "学校类型", region: "来源地区", province: "来源省份", cfu: "CFU 范围", quality: "数据质量", population: "人口学筛选", numeric: "连续变量", attention: "排除注意力检查未通过者", anomalyOnly: "只看有异常的人", selectHelp: "可多选，按住 ⌘/Ctrl", current: "当前筛选", sample: "当前样本 N", anomalous: "有异常标记", anomalyBadge: "异常", attentionFail: "注意力未通过", scaleCount: "量表数量", open: "打开量表", back: "返回量表列表", questions: "题目与计分配置", participantData: "当前筛选下的所有人", factor: "因子", factorExplain: "因子是一组共同测量同一个心理特质的题目。系统先按配置处理每道题，再用均值或求和汇总为该因子分数。", method: "方法", range: "范围", reverse: "反向题", yes: "是", no: "否", mean: "均值", sum: "求和", copy: "复制当前表格 TSV", scaleMean: "当前筛选均值", alpha: "Cronbach α", itemCount: "题目数", factorCount: "因子数", allRespondents: "所有人的得分", descriptive: "描述统计", applyConfig: "应用并重新计分", downloadJson: "下载 JSON", configApplied: "配置已应用，所有分数已重新计算。", configExplain: "所有题目按 0 起算列号读取；重复变量名不会混淆。", corr: "两因子 Pearson 相关", ttest: "Welch t 检验", frequency: "当前筛选频数", group: "分组变量", outcome: "结果因子", groupA: "组 A", groupB: "组 B", chooseFactors: "选择因子后显示 r、n 和双侧 p。", loadFailed: "载入失败", language: "语言", structure: "数据结构", formula: "反向公式", missing: "缺失值规则", editable: "编码表、注意力检查列、题目列、反向题和计分方法都可以在 JSON 中修改。", examples: "手算验证示例", verify: "验证方法：上传原始 Excel 后先检查结构提示，再用少量已知答案手算；修改 JSON 后重新应用并比较同一人的分数。", anomalyTitle: "异常标准（只标记，不自动删除）", anomalyZ: "|z| > 3：相对全体样本均值超过 3 个标准差。", anomalyIqr: "1.5×IQR：低于 Q1 − 1.5×IQR 或高于 Q3 + 1.5×IQR。", anomalyRange: "题目越界：原始答案超出该因子的配置范围。", anomalyStraight: "Straight-lining：量表包含至少 10 题且所有题目答案完全相同。", anomalyAttention: "注意力检查：controllo2 不等于正确编码 1。", anomalyLegend: "单元格颜色：红色 = 越界或 |z|>3；黄色 = 1.5×IQR；紫色 = straight-lining 或其他异常。", questionHeader: "题号", columnHeader: "0 起算列", excelHeader: "Excel 列", cfuMean: "CFU 均值", factorX: "因子 X", factorY: "因子 Y", close: "关闭", min: "最小", max: "最大", loaded: "已载入数据", missingValue: "未填写", allParticipants: "所有参与者", sampleNote: "异常依据完整载入样本计算。", scaleHeader: "量表", nHeader: "N", meanHeader: "均值", sdHeader: "标准差", medianHeader: "中位数", minHeader: "最小值", maxHeader: "最大值", venetoGroup: "Veneto / 非 Veneto", twoSidedP: "双侧 p", validPairs: "有效配对样本", tooFewPairs: "有效配对样本少于 3，结果仅作提示。", chooseDifferent: "请选择两个不同的组。", noGroupData: "所选组在当前筛选样本中没有有效数据。", minGroupN: "每组至少需要 2 个有效观测：{a} n={na}，{b} n={nb}。", zeroVariance: "两组方差均为 0，无法计算 Welch t。", copied: "当前表格已复制为 TSV，可直接粘贴到 Excel。", copiedShort: "当前表格已复制为 TSV。", copyFailed: "复制失败，请手动选择表格内容。", downloadBlocked: "浏览器阻止了下载，请使用“复制表格”或手动复制 JSON。", loadedMessage: "{file} · {n} 位参与者 · {cols} 列 · 已跳过题干行"
+    },
+    en: {
+      title: "Questionnaire Scoring & Explorer", subtitle: "Psicometria e Personalità · Local browser analysis tool", privacy: "🔒 Data stays in this browser and is never uploaded", upload: "Upload Excel", reset: "Clear data", filters: "Filters",
+      overview: "Overview", scales: "Scale Explorer", stats: "Statistics & Tests", rules: "Scoring Rules", apply: "Apply filters", clear: "Clear filters", help: "Choose conditions, then click “Apply filters”", noData: "Waiting for data", uploadHint: "Upload the original Excel file. Data never leaves this browser.",
+      id: "Participant ID", gender: "Gender", school: "School type", region: "Region", province: "Province", cfu: "CFU range", quality: "Data quality", population: "Demographic filters", numeric: "Continuous variable", attention: "Exclude failed attention checks", anomalyOnly: "Show participants with anomalies only", selectHelp: "Multi-select with ⌘/Ctrl", current: "Current filters", sample: "Current N", anomalous: "Flagged with anomalies", anomalyBadge: "Anomaly", attentionFail: "Attention failures", scaleCount: "Scales", open: "Open scale", back: "Back to scales", questions: "Items & scoring configuration", participantData: "All participants in the current filter", factor: "Factor", factorExplain: "A factor is a set of items intended to measure the same psychological trait. The configured reverse key is applied first, then items are aggregated by mean or sum.", method: "Method", range: "Range", reverse: "Reverse item", yes: "Yes", no: "No", mean: "Mean", sum: "Sum", copy: "Copy current table TSV", scaleMean: "Current filtered mean", alpha: "Cronbach α", itemCount: "Items", factorCount: "Factors", allRespondents: "All participant scores", descriptive: "Descriptive statistics", applyConfig: "Apply and rescore", downloadJson: "Download JSON", configApplied: "Configuration applied; scores were recalculated.", configExplain: "Items are read by zero-based column position; duplicate variable names are safe.", corr: "Two-factor Pearson correlation", ttest: "Welch t-test", frequency: "Frequencies in current filter", group: "Grouping variable", outcome: "Outcome factor", groupA: "Group A", groupB: "Group B", chooseFactors: "Choose factors to show r, n and two-sided p.", loadFailed: "Load failed", language: "Language", structure: "Data structure", formula: "Reverse-score formula", missing: "Missing-value rule", editable: "Codebooks, attention-check column, item columns, reverse keys and scoring methods can be edited in JSON.", examples: "Manual checks", verify: "Verification: upload the original Excel, check the structure message, hand-calculate a few known answers, then apply a JSON edit and compare the same participant’s score.", anomalyTitle: "Anomaly criteria (flagged, not deleted)", anomalyZ: "|z| > 3: the score is more than 3 standard deviations from the full-sample mean.", anomalyIqr: "1.5×IQR: below Q1 − 1.5×IQR or above Q3 + 1.5×IQR.", anomalyRange: "Out-of-range item: the raw response is outside the configured factor range.", anomalyStraight: "Straight-lining: a scale with at least 10 items has exactly the same answer on every item.", anomalyAttention: "Attention check: controllo2 is not the correct code 1.", anomalyLegend: "Cell colors: red = out-of-range or |z|>3; yellow = 1.5×IQR; purple = straight-lining or another anomaly.", questionHeader: "Question", columnHeader: "0-based column", excelHeader: "Excel column", cfuMean: "CFU mean", factorX: "Factor X", factorY: "Factor Y", close: "Close", min: "Min", max: "Max", loaded: "Data loaded", missingValue: "Not provided", allParticipants: "All participants", sampleNote: "Anomaly rules use the full loaded sample.", scaleHeader: "Scale", nHeader: "N", meanHeader: "Mean", sdHeader: "SD", medianHeader: "Median", minHeader: "Min", maxHeader: "Max", venetoGroup: "Veneto / non-Veneto", twoSidedP: "Two-sided p", validPairs: "Valid pairs", tooFewPairs: "Fewer than 3 valid pairs; treat this result as a prompt only.", chooseDifferent: "Choose two different groups.", noGroupData: "The selected group has no valid data in the current filter.", minGroupN: "Each group needs at least 2 valid observations: {a} n={na}, {b} n={nb}.", zeroVariance: "Both groups have zero variance; Welch's t cannot be calculated.", copied: "The current table was copied as TSV; you can paste it into Excel.", copiedShort: "The current table was copied as TSV.", copyFailed: "Copy failed; please select the table content manually.", downloadBlocked: "The browser blocked the download; use “Copy table” or copy the JSON manually.", loadedMessage: "{file} · {n} participants · {cols} columns · question-text row skipped"
+    },
+    it: {
+      title: "Punteggio e analisi dei questionari", subtitle: "Psicometria e Personalità · Analisi locale nel browser", privacy: "🔒 I dati restano nel browser e non vengono caricati", upload: "Carica Excel", reset: "Cancella dati", filters: "Filtri",
+      overview: "Panoramica", scales: "Analisi delle scale", stats: "Statistiche e test", rules: "Regole di scoring", apply: "Applica filtri", clear: "Cancella filtri", help: "Scegli le condizioni e premi “Applica filtri”", noData: "In attesa dei dati", uploadHint: "Carica il file Excel originale. I dati non lasciano il browser.",
+      id: "ID partecipante", gender: "Genere", school: "Tipo di scuola", region: "Regione", province: "Provincia", cfu: "Intervallo CFU", quality: "Qualità dei dati", population: "Filtri demografici", numeric: "Variabile continua", attention: "Escludi chi non supera il controllo attenzione", anomalyOnly: "Mostra solo i casi anomali", selectHelp: "Selezione multipla con ⌘/Ctrl", current: "Filtri attivi", sample: "N corrente", anomalous: "Casi anomali", anomalyBadge: "Anomalia", attentionFail: "Controlli attenzione falliti", scaleCount: "Scale", open: "Apri scala", back: "Torna alle scale", questions: "Item e configurazione scoring", participantData: "Tutti i partecipanti filtrati", factor: "Fattore", factorExplain: "Un fattore è un insieme di item che misura lo stesso tratto psicologico. Prima si applicano le chiavi inverse, poi si aggregano gli item con media o somma.", method: "Metodo", range: "Intervallo", reverse: "Item inverso", yes: "Sì", no: "No", mean: "Media", sum: "Somma", copy: "Copia tabella TSV", scaleMean: "Media filtrata", alpha: "Cronbach α", itemCount: "Item", factorCount: "Fattori", allRespondents: "Punteggi di tutti i partecipanti", descriptive: "Statistiche descrittive", applyConfig: "Applica e ricalcola", downloadJson: "Scarica JSON", configApplied: "Configurazione applicata; punteggi ricalcolati.", configExplain: "Gli item sono letti per posizione di colonna; i nomi duplicati sono gestiti correttamente.", corr: "Correlazione Pearson tra due fattori", ttest: "Welch t-test", frequency: "Frequenze nei filtri attivi", group: "Variabile di gruppo", outcome: "Fattore risultato", groupA: "Gruppo A", groupB: "Gruppo B", chooseFactors: "Scegli i fattori per visualizzare r, n e p bilaterale.", loadFailed: "Caricamento fallito", language: "Lingua", structure: "Struttura dati", formula: "Formula per l’inversione", missing: "Regola dei dati mancanti", editable: "È possibile modificare nel JSON le codifiche, la colonna di attenzione, gli item, le chiavi inverse e i metodi di scoring.", examples: "Esempi di verifica", verify: "Verifica: carica l’Excel originale, controlla il messaggio strutturale, calcola a mano alcuni casi noti, poi applica una modifica JSON e confronta lo stesso partecipante.", anomalyTitle: "Criteri di anomalia (solo segnalati, non eliminati)", anomalyZ: "|z| > 3: il punteggio è oltre 3 deviazioni standard dalla media del campione completo.", anomalyIqr: "1.5×IQR: sotto Q1 − 1.5×IQR o sopra Q3 + 1.5×IQR.", anomalyRange: "Item fuori intervallo: la risposta grezza è fuori dall’intervallo configurato.", anomalyStraight: "Straight-lining: una scala con almeno 10 item ha la stessa risposta su tutti gli item.", anomalyAttention: "Controllo attenzione: controllo2 non è il codice corretto 1.", anomalyLegend: "Colori: rosso = fuori intervallo o |z|>3; giallo = 1.5×IQR; viola = straight-lining o altra anomalia.", questionHeader: "Domanda", columnHeader: "Colonna 0-based", excelHeader: "Colonna Excel", cfuMean: "Media CFU", factorX: "Fattore X", factorY: "Fattore Y", close: "Chiudi", min: "Min", max: "Max", loaded: "Dati caricati", missingValue: "Non compilato", allParticipants: "Tutti i partecipanti", sampleNote: "I criteri di anomalia usano l’intero campione caricato.", scaleHeader: "Scala", nHeader: "N", meanHeader: "Media", sdHeader: "DS", medianHeader: "Mediana", minHeader: "Min", maxHeader: "Max", venetoGroup: "Veneto / non Veneto", twoSidedP: "p bilaterale", validPairs: "coppie valide", tooFewPairs: "Meno di 3 coppie valide: interpretare il risultato solo come indicazione.", chooseDifferent: "Scegli due gruppi diversi.", noGroupData: "Il gruppo selezionato non ha dati validi nel filtro attivo.", minGroupN: "Ogni gruppo richiede almeno 2 osservazioni valide: {a} n={na}, {b} n={nb}.", zeroVariance: "Entrambi i gruppi hanno varianza nulla; il t di Welch non può essere calcolato.", copied: "La tabella corrente è stata copiata come TSV; puoi incollarla in Excel.", copiedShort: "La tabella corrente è stata copiata come TSV.", copyFailed: "Copia non riuscita; seleziona manualmente il contenuto della tabella.", downloadBlocked: "Il browser ha bloccato il download; usa “Copia tabella” o copia manualmente il JSON.", loadedMessage: "{file} · {n} partecipanti · {cols} colonne · riga del testo delle domande saltata"
+    }
+  };
+  let lang = "zh";
+  const state = { rows: [], records: [], config: null, tab: "all", selectedScale: null, selectedPerson: null, filtered: [], copiedText: "", vizView: "group", vizScale: null, vizChart: "bar", vizPerson: null, vizFactors: [] };
+  const t = key => (I18N[lang] && I18N[lang][key]) || I18N.zh[key] || key;
+  const DISPLAY_LABELS = {
+    bfi: { scale: { zh:"BFI-44 · 五因素人格量表", en:"BFI-44 · Big Five Inventory", it:"BFI-44 · Inventario dei Cinque Grandi" }, factors: { E:{zh:"外向性",en:"Extroversion",it:"Estroversione"}, A:{zh:"宜人性",en:"Agreeableness",it:"Amicalità"}, C:{zh:"尽责性",en:"Conscientiousness",it:"Coscienziosità"}, N:{zh:"神经质",en:"Neuroticism",it:"Nevroticismo"}, O:{zh:"开放性",en:"Openness",it:"Apertura"} } },
+    bisbas: { scale: { zh:"BIS/BAS · 行为抑制与行为激活", en:"BIS/BAS", it:"BIS/BAS · Inibizione e attivazione comportamentale" }, factors: { bis:{zh:"行为抑制",en:"BIS",it:"BIS"}, bas_drive:{zh:"驱动力",en:"BAS Drive",it:"BAS Drive"}, bas_fun_seeking:{zh:"寻求乐趣",en:"BAS Fun Seeking",it:"BAS Fun Seeking"}, bas_reward_responsiveness:{zh:"奖赏反应性",en:"BAS Reward Responsiveness",it:"BAS Reward Responsiveness"} } },
+    study: { scale: { zh:"QAS-Short · 学习方法", en:"QAS-Short · Study Approach", it:"QAS-Short · Approccio allo studio" }, factors: { organizzazione:{zh:"组织",en:"Organization",it:"Organizzazione"}, elaborazione:{zh:"信息加工",en:"Elaboration",it:"Elaborazione"}, autovalutazione:{zh:"自我评价",en:"Self-evaluation",it:"Autovalutazione"}, strategie:{zh:"学习策略",en:"Strategies",it:"Strategie"}, "sensibilità metacognitiva":{zh:"元认知敏感性",en:"Metacognitive sensitivity",it:"Sensibilità metacognitiva"}, study_total:{zh:"总分",en:"Total Score",it:"Punteggio totale"} } },
+    spatial: { scale: { zh:"空间焦虑", en:"Spatial Anxiety", it:"Ansia spaziale" }, factors: { spatial_total:{zh:"总分",en:"Total Score",it:"Punteggio totale"} } },
+    explore: { scale: { zh:"探索偏好", en:"Exploration Preference", it:"Piacere di esplorare" }, factors: { explore:{zh:"探索未知的偏好",en:"Preference for exploring",it:"Piacere di esplorare"}, known:{zh:"熟悉事物的偏好",en:"Preference for the familiar",it:"Piacere del noto"} } },
+    orientation: { scale: { zh:"空间定向感", en:"Sense of Orientation", it:"Senso dell’orientamento" }, factors: { survey:{zh:"调查",en:"Survey",it:"Survey"}, route:{zh:"路线/视觉",en:"Route/Visual",it:"Route/Visivo"}, cardinal:{zh:"基点方向",en:"Cardinal directions",it:"Punti cardinali"} } },
+    epq: { scale: { zh:"EPQ-R 简版", en:"EPQ-R Short Form", it:"EPQ-R · Forma breve" }, factors: { P:{zh:"精神质",en:"Psychoticism",it:"Psicoticismo"}, E:{zh:"外向性",en:"Extroversion",it:"Estroversione"}, N:{zh:"神经质",en:"Neuroticism",it:"Nevroticismo"}, L:{zh:"掩饰性",en:"Lie scale",it:"Scala Lie"} } },
+    memory: { scale: { zh:"记忆敏感性", en:"Memory Sensitivity", it:"Sensibilità della memoria" }, factors: { memory_total:{zh:"总分",en:"Total Score",it:"Punteggio totale"} } }
+  };
+  function scaleLabel(scale) { return DISPLAY_LABELS[scale.id]?.scale?.[lang] || scale.label; }
+  function factorLabel(scale, factor) { return DISPLAY_LABELS[scale.id]?.factors?.[factor.id]?.[lang] || factor.label; }
+  const EXTRA_I18N = {
+    zh: {
+      visuals:"图示分析", visualTitle:"可视化", visualSubtitle:"选择个人或当前群体，按量表和因子生成柱状图或折线图。", visualView:"分析对象", visualPerson:"个人", visualGroup:"当前群体", visualScale:"量表", visualPersonId:"个人", visualChart:"图表类型", visualBar:"柱状图", visualLine:"折线图", visualFactors:"选择因子", visualGenerate:"生成图表", visualNoData:"当前没有可用于绘图的数据。", visualNoFactors:"请至少选择一个因子。", visualChartTitle:"因子得分", visualMean:"群体均值", visualScore:"得分", visualN:"有效样本", visualTable:"所选个人的因子数据", visualGroupNote:"群体图使用当前筛选后的有效样本，并显示每个所选因子的均值。", visualPersonNote:"个人图显示该参与者在所选因子上的得分。", rulesStructureDetail:"0 起算列 184：controllo2；0 起算列 129：EPI_1。", rulesFormulaDetail:"反向题公式：最小值 + 最大值 − 原始答案。", rulesMissingDetail:"因子缺失率超过 20% 时，该因子得分记为缺失。否则，均值型取可用题均值，求和型按可用题均值 × 题目数计算。", rulesProvinceDetail:"省份清洗优先读取括号内两字母缩写；常见城市映射为省份缩写。", rulesExample1:"BFI 1–5：反向题原始答案 1 → 1 + 5 − 1 = 5。", rulesExample2:"BIS/BAS 1–4：第 2 题原始答案 1 → 4；第 8 题非反向 → 1。", rulesExample3:"EPQ 0/1：P 因子第 2 题反向答案 1 → 0。", rulesExample4:"定向：116–117 列为 Survey；118–119 列为 Route/Visual。", codeMale:"男", codeFemale:"女", codeOther:"其他", codeSchool1:"类型1", codeSchool2:"类型2", codeSchool3:"类型3", codeAbroad:"境外/其他"
+    },
+    en: {
+      visuals:"Visualization", visualTitle:"Visualization", visualSubtitle:"Choose a participant or the current group, then generate a bar or line chart by scale and factor.", visualView:"View", visualPerson:"Participant", visualGroup:"Current group", visualScale:"Scale", visualPersonId:"Participant", visualChart:"Chart type", visualBar:"Bar chart", visualLine:"Line chart", visualFactors:"Select factors", visualGenerate:"Generate chart", visualNoData:"There is no usable data for a chart.", visualNoFactors:"Select at least one factor.", visualChartTitle:"Factor scores", visualMean:"Group mean", visualScore:"Score", visualN:"Valid N", visualTable:"Selected participant factor data", visualGroupNote:"The group chart uses valid records in the current filter and shows the mean for each selected factor.", visualPersonNote:"The participant chart shows this participant’s score for each selected factor.", rulesStructureDetail:"Zero-based column 184: controllo2; zero-based column 129: EPI_1.", rulesFormulaDetail:"Reverse-score formula: minimum + maximum − raw response.", rulesMissingDetail:"If more than 20% of a factor’s items are missing, the factor score is missing. Otherwise, mean scoring uses the available-item mean; sum scoring uses that mean multiplied by the item count.", rulesProvinceDetail:"Province cleaning first reads two-letter codes in parentheses, then maps common city names to province codes.", rulesExample1:"BFI 1–5: raw 1 on a reverse item → 1 + 5 − 1 = 5.", rulesExample2:"BIS/BAS 1–4: item 2 raw 1 → 4; item 8 is not reverse → 1.", rulesExample3:"EPQ 0/1: P item 2 raw 1 on a reverse key → 0.", rulesExample4:"Orientation: columns 116–117 map to Survey; 118–119 map to Route/Visual.", codeMale:"Male", codeFemale:"Female", codeOther:"Other", codeSchool1:"Type 1", codeSchool2:"Type 2", codeSchool3:"Type 3", codeAbroad:"Abroad/Other"
+    },
+    it: {
+      visuals:"Visualizzazione", visualTitle:"Visualizzazione", visualSubtitle:"Scegli un partecipante o il gruppo corrente e genera un grafico a barre o a linee per scala e fattore.", visualView:"Vista", visualPerson:"Partecipante", visualGroup:"Gruppo corrente", visualScale:"Scala", visualPersonId:"Partecipante", visualChart:"Tipo di grafico", visualBar:"Grafico a barre", visualLine:"Grafico a linee", visualFactors:"Seleziona i fattori", visualGenerate:"Genera grafico", visualNoData:"Non ci sono dati utilizzabili per il grafico.", visualNoFactors:"Seleziona almeno un fattore.", visualChartTitle:"Punteggi dei fattori", visualMean:"Media del gruppo", visualScore:"Punteggio", visualN:"N valido", visualTable:"Dati dei fattori del partecipante selezionato", visualGroupNote:"Il grafico del gruppo usa i record validi nel filtro corrente e mostra la media di ogni fattore selezionato.", visualPersonNote:"Il grafico del partecipante mostra il punteggio del partecipante per ogni fattore selezionato.", rulesStructureDetail:"Colonna 0-based 184: controllo2; colonna 0-based 129: EPI_1.", rulesFormulaDetail:"Formula per l’inversione: minimo + massimo − risposta grezza.", rulesMissingDetail:"Se manca più del 20% degli item di un fattore, il punteggio è mancante. Altrimenti il metodo media usa la media degli item disponibili; il metodo somma moltiplica questa media per il numero di item.", rulesProvinceDetail:"La pulizia della provincia legge prima i codici di due lettere tra parentesi, poi mappa i nomi comuni delle città ai codici provinciali.", rulesExample1:"BFI 1–5: risposta grezza 1 su un item inverso → 1 + 5 − 1 = 5.", rulesExample2:"BIS/BAS 1–4: item 2 con risposta 1 → 4; item 8 non è inverso → 1.", rulesExample3:"EPQ 0/1: item 2 del fattore P con risposta inversa 1 → 0.", rulesExample4:"Orientamento: le colonne 116–117 corrispondono a Survey; 118–119 a Route/Visual.", codeMale:"Maschile", codeFemale:"Femminile", codeOther:"Altro", codeSchool1:"Tipo 1", codeSchool2:"Tipo 2", codeSchool3:"Tipo 3", codeAbroad:"Estero/Altro"
+    }
+  };
+  const tx = key => (EXTRA_I18N[lang] && EXTRA_I18N[lang][key]) || EXTRA_I18N.en[key] || key;
+  function applyLanguageChrome() { document.title=t("title"); $("#app-title").textContent = t("title"); $("#app-subtitle").textContent = t("subtitle"); $("#privacy-note").textContent = t("privacy"); $("#upload-label-text").textContent = t("upload"); $("#reset-btn").textContent = t("reset"); $("#filter-title").textContent = t("filters"); if(!state.records.length)$("#filter-fields").innerHTML=`<div class="empty">${t("uploadHint")}</div>`; document.documentElement.lang = lang === "zh" ? "zh-CN" : lang; }
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const esc = value => String(value == null ? "" : value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const num = value => { if (value === null || value === undefined || value === "") return NaN; const n = Number(String(value).replace(",", ".")); return Number.isFinite(n) ? n : NaN; };
+  const fmt = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
+  const arr = (start, count) => Array.from({ length: count }, (_, i) => start + i);
+  // ``questions`` preserves the original questionnaire numbers after a
+  // factor has been split out of a larger scale. Reverse keys must refer to
+  // those original numbers, not to the factor-local array positions.
+  const items = (cols, reverse = [], questions = null) => cols.map((col, i) => { const q = questions ? questions[i] : i + 1; return { col, q: String(q), reverse: reverse.includes(q) }; });
+  const makeFactor = (id, label, cols, reverse, min, max, method, questions = null) => ({ id, label, min, max, method, items: items(cols, reverse, questions) });
+
+  function buildDefaultConfig() {
+    const bfiCols = arr(10, 44);
+    const bfiGroups = [
+      ["E", "Extroversion", [1,6,11,16,21,26,31,36], [6,21,31]],
+      ["A", "Agreeableness", [2,7,12,17,22,27,32,37,42], [2,12,27,37]],
+      ["C", "Conscientiousness", [3,8,13,18,23,28,33,38,43], [8,18,23,43]],
+      ["N", "Neuroticism", [4,9,14,19,24,29,34,39], [9,24,34]],
+      ["O", "Openness", [5,10,15,20,25,30,35,40,41,44], [35,41]]
+    ];
+    const scales = [{ id: "bfi", label: "BFI-44 · Big Five Inventory", items: bfiCols, factors: bfiGroups.map(g => makeFactor(g[0], g[1], g[2].map(q => bfiCols[q-1]), g[3], 1, 5, "mean", g[2])) }];
+    const bis = [
+      ["BIS", [2,8,13,16,19,22,24], [2,22]], ["BAS Drive", [3,9,12,21], []],
+      ["BAS Fun Seeking", [5,10,15,20], []], ["BAS Reward Responsiveness", [4,7,14,18,23], []]
+    ];
+    scales.push({ id: "bisbas", label: "BIS/BAS", items: arr(54,24), factors: bis.map(g => makeFactor(g[0].toLowerCase().replaceAll(" ", "_"), g[0], g[1].map(q => 54+q-1), g[2], 1, 4, "sum", g[1])) });
+    const study = [
+      ["Organizzazione", [1,9,11,17], [9,17]], ["Elaborazione", [2,13,15,19], [2]],
+      ["Autovalutazione", [3,4,8,16], [8]], ["Strategie", [5,10,12,18], [5,10,12]],
+      ["Sensibilità metacognitiva", [6,7,14,20], []]
+    ];
+    const studyAll = study.flatMap(g => g[1].map(q => ({ q, reverse: g[2].includes(q) })));
+    scales.push({ id: "study", label: "QAS-Short · Study Approach", items: arr(78,20), factors: study.map(g => makeFactor(g[0].toLowerCase(), g[0], g[1].map(q => 78+q-1), g[2], 1, 5, "sum", g[1]))
+      .concat([{ id: "study_total", label: "Total Score", min: 1, max: 5, method: "sum", items: studyAll.map(x => ({ col: 78+x.q-1, q: String(x.q), reverse: x.reverse })) }]) });
+    scales.push({ id: "spatial", label: "Ansia Spaziale", items: arr(98,8), factors: [makeFactor("spatial_total", "Total Score", arr(98,8), [], 1, 6, "sum")] });
+    scales.push({ id: "explore", label: "Piacere di Esplorare", items: arr(106,10), factors: [
+      makeFactor("explore", "Piacere di esplorare", [106,107,110,111,114], [], 1, 7, "sum", [1,2,5,6,9]),
+      makeFactor("known", "Piacere del noto", [108,109,112,113,115], [], 1, 7, "sum", [3,4,7,8,10])
+    ] });
+    const orient = [
+      ["survey", "Survey", [116,117,120,121,126,127]],
+      ["route", "Route/Visivo", [118,119,122,123]],
+      ["cardinal", "Cardinali", [124,125,128]]
+    ];
+    scales.push({ id: "orientation", label: "Senso dell’orientamento", items: arr(116,13), factors: orient.map((g, i) => makeFactor(g[0], g[1], g[2], [], 1, 5, "mean", [[1,2,"3c", "4a",7,8],["3a","3b","4b","4c"],[5,6,9]][i])) });
+    const epqGroups = [
+      ["P", "Psicoticismo / 精神质", [2,6,10,14,18,22,26,28,31,35,39,43], [2,6,18,26,28,35,43]],
+      ["E", "Estroversione / 外向", [3,7,11,15,19,23,27,32,36,41,44,48], [27,41]],
+      ["N", "Nevroticismo / 神经质", [1,5,9,13,17,21,25,30,34,38,42,46], []],
+      ["L", "Lie / 掩饰", [4,8,12,16,20,24,29,33,37,40,45,47], [8,12,20,24,29,33,37,40,47]]
+    ];
+    scales.push({ id: "epq", label: "EPQ-R Short Form", items: arr(129,48), factors: epqGroups.map(g => makeFactor(g[0], g[1], g[2].map(q => 129+q-1), g[3], 0, 1, "sum", g[2])) });
+    // Columns 177–183 are SM1–SM7; column 184 is controllo2 and must not be
+    // included; columns 185–211 are SM8–SM34.
+    const memoryCols = arr(177,7).concat(arr(185,27));
+    scales.push({ id: "memory", label: "Memory Sensitivity", items: memoryCols, factors: [makeFactor("memory_total", "Total Score", memoryCols, [], 1, 4, "sum")] });
+    return {
+      version: "1.0", missing_rule: "因子缺失率 > 20% 则缺失；否则 mean 型取可用题均值，sum 型 = 可用题均值 × 题数",
+      attention: { column: 184, variable: "controllo2", correct: 1, excludeDefault: false },
+      codebooks: { gender: GENDER, school: SCHOOL, region: REGION },
+      province_normalization: "括号内两字母优先；常见城市映射为省份缩写；无法识别者保留清洗后的文本",
+      scales
+    };
+  }
+
+  function showNotice(message, type = "") { $("#notice").innerHTML = message ? `<div class="notice ${type}">${message}</div>` : ""; }
+  function localizedError(message) { if(lang==="zh") return message; const it=lang==="it"; if(message.includes("数据列数不足")) return it ? "Numero di colonne insufficiente: il file deve contenere almeno 212 colonne." : "Not enough columns: the file must contain at least 212 columns."; if(message.includes("结构校验失败")) return it ? "Controllo della struttura non riuscito: verificare le intestazioni e le righe del file Excel." : "Structure check failed: verify the Excel headers and rows."; if(message.includes("没有找到")) return it ? "Nessuna risposta valida trovata dalla terza riga." : "No valid responses were found from row 3 onward."; if(message.includes("配置必须包含")) return it ? "La configurazione deve contenere un array scales non vuoto." : "The configuration must contain a non-empty scales array."; if(message.includes("每个量表必须有")) return it ? "Ogni scala deve avere id, label e factors." : "Each scale must have id, label and factors."; if(message.includes("items 为空")) return it ? "Ogni fattore deve contenere almeno un item." : "Each factor must contain at least one item."; return message; }
+  function validateConfig(cfg) {
+    if (!cfg || !Array.isArray(cfg.scales) || !cfg.scales.length) throw new Error("配置必须包含非空 scales 数组。");
+    cfg.scales.forEach(scale => {
+      if (!scale.id || !scale.label || !Array.isArray(scale.factors)) throw new Error("每个量表必须有 id、label、factors。");
+      scale.factors.forEach(f => { if (!f.label || !Array.isArray(f.items) || !f.items.length) throw new Error(`因子 ${f.label || "未命名"} 的 items 为空。`); });
+    });
+  }
+  function normProvince(value) {
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) return t("missingValue");
+    const upper = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const inBrackets = upper.match(/[\(（]\s*([A-Z]{2})\s*[\)）]/);
+    if (inBrackets) return inBrackets[1];
+    const direct = upper.match(/^\s*([A-Z]{2})\s*$/);
+    if (direct) return direct[1];
+    const map = {
+      PADOVA: "PD", PADUA: "PD", FERRARA: "FE", VICENZA: "VI", VERONA: "VR", TREVISO: "TV",
+      VENEZIA: "VE", VENICE: "VE", ROVIGO: "RO", BELLUNO: "BL", MILANO: "MI", ROMA: "RM",
+      BOLOGNA: "BO", FIRENZE: "FI", TORINO: "TO", NAPOLI: "NA", BARI: "BA", GENOVA: "GE",
+      PALERMO: "PA", MODENA: "MO", PARMA: "PR", MANTOVA: "MN", BRESCIA: "BS", BERGAMO: "BG"
+    };
+    for (const [name, code] of Object.entries(map)) if (upper.includes(name)) return code;
+    return upper.replace(/\s+/g, " ");
+  }
+  function codeLabel(value, book, type="") { const n = num(value); if(!Number.isFinite(n))return value === "" || value == null ? t("missingValue") : String(value); const localized={gender:{zh:{1:"男",2:"女",3:"其他"},en:{1:"Male",2:"Female",3:"Other"},it:{1:"Maschile",2:"Femminile",3:"Altro"}},school:{zh:{1:"类型1",2:"类型2",3:"类型3"},en:{1:"Type 1",2:"Type 2",3:"Type 3"},it:{1:"Tipo 1",2:"Tipo 2",3:"Tipo 3"}},region:{zh:{21:"境外/其他"},en:{21:"Abroad/Other"},it:{21:"Estero/Altro"}}}; if(type&&localized[type]&&localized[type][lang]&&localized[type][lang][n])return `${n} · ${localized[type][lang][n]}`; return book && book[String(n)] ? `${n} · ${book[String(n)]}` : String(value); }
+  function readItem(row, item) { return num(row[item.col]); }
+  function reverseScore(value, item, factor) { return item.reverse && Number.isFinite(value) ? factor.min + factor.max - value : value; }
+  function scoreFactor(row, factor) {
+    const raw = factor.items.map(item => readItem(row, item));
+    const recoded = raw.map((v, i) => reverseScore(v, factor.items[i], factor));
+    const present = recoded.filter(Number.isFinite);
+    const missingRate = (recoded.length - present.length) / recoded.length;
+    let score = null;
+    if (present.length && missingRate <= .20) {
+      const mean = present.reduce((a, b) => a + b, 0) / present.length;
+      score = factor.method === "mean" ? mean : mean * recoded.length;
+    }
+    return { score, raw, recoded, missingRate };
+  }
+  function makeRecord(row, index, cfg) {
+    const scores = {}, details = {}, anomalyReasons = [], factorReasons = {};
+    cfg.scales.forEach(scale => scale.factors.forEach(factor => {
+      const detail = scoreFactor(row, factor); const key = `${scale.id}::${factor.id}`;
+      scores[key] = detail.score; details[key] = detail; factorReasons[key] = [];
+      detail.raw.forEach(v => { if (Number.isFinite(v) && (v < factor.min || v > factor.max)) factorReasons[key].push(`RANGE:${factor.min}:${factor.max}`); });
+    }));
+    const attentionCol = cfg.attention?.column ?? 184; const attention = num(row[attentionCol]);
+    const attentionFail = Number.isFinite(attention) && attention !== Number(cfg.attention?.correct ?? 1);
+    if (attentionFail) anomalyReasons.push("ATTENTION");
+    return {
+      id: `P${String(index + 1).padStart(3, "0")}`, row, scores, details, factorReasons, anomalyReasons,
+      gender: codeLabel(row[COL.gender], cfg.codebooks.gender, "gender"), genderCode: num(row[COL.gender]),
+      school: codeLabel(row[COL.school], cfg.codebooks.school, "school"), schoolCode: num(row[COL.school]),
+      region: codeLabel(row[COL.region], cfg.codebooks.region, "region"), regionCode: num(row[COL.region]),
+      province: normProvince(row[COL.province]), cfu: num(row[COL.cfu]), attentionFail
+    };
+  }
+  function allScaleItems(scale) { return [...new Set(scale.factors.flatMap(f => f.items.map(i => i.col)))]; }
+  function mean(values) { const x = values.filter(Number.isFinite); return x.length ? x.reduce((a,b)=>a+b,0)/x.length : NaN; }
+  function sd(values) { const x = values.filter(Number.isFinite); if (x.length < 2) return NaN; const m = mean(x); return Math.sqrt(x.reduce((s,v)=>s+(v-m)**2,0)/(x.length-1)); }
+  function quantile(values, q) { const x = values.filter(Number.isFinite).sort((a,b)=>a-b); if (!x.length) return NaN; const pos=(x.length-1)*q, base=Math.floor(pos), rest=pos-base; return x[base+1] !== undefined ? x[base]+rest*(x[base+1]-x[base]) : x[base]; }
+  function addAnomalies() {
+    state.records.forEach(r => { r.anomalyReasons = r.attentionFail ? ["ATTENTION"] : []; Object.values(r.factorReasons).forEach(x => x.splice(0)); });
+    state.config.scales.forEach(scale => {
+      scale.factors.forEach(factor => {
+        const key = `${scale.id}::${factor.id}`; const values = state.records.map(r => r.scores[key]);
+        const valid = values.filter(Number.isFinite), m = mean(valid), s = sd(valid), q1 = quantile(valid,.25), q3 = quantile(valid,.75), iqr = q3-q1;
+        state.records.forEach((r, i) => {
+          const v = values[i]; if (!Number.isFinite(v)) return;
+          if (Number.isFinite(s) && s > 0 && Math.abs((v-m)/s) > 3) r.factorReasons[key].push("Z");
+          if (Number.isFinite(iqr) && (v < q1-1.5*iqr || v > q3+1.5*iqr)) r.factorReasons[key].push("IQR");
+        });
+      });
+      const scaleItems = allScaleItems(scale);
+      if (scaleItems.length >= 10) state.records.forEach(r => {
+        const vals = scaleItems.map(c => num(r.row[c])).filter(Number.isFinite);
+        if (vals.length === scaleItems.length && new Set(vals).size === 1) {
+          scale.factors.forEach(f => { const key=`${scale.id}::${f.id}`; r.factorReasons[key].push("STRAIGHT"); });
+        }
+      });
+    });
+    state.records.forEach(r => { Object.entries(r.factorReasons).forEach(([key,reasons])=>{const factor=state.config.scales.flatMap(s=>s.factors.map(f=>({s,f,key:factorKey(s,f)}))).find(x=>x.key===key); reasons.forEach(reason=>r.anomalyReasons.push(`${factor ? factorLabel(factor.s,factor.f) : key}: ${formatAnomalyReason(reason)}`));}); r.anomalyReasons=r.anomalyReasons.map(x=>x==="ATTENTION"?formatAnomalyReason(x):x); r.hasAnomaly = r.anomalyReasons.length > 0; });
+  }
+  function formatAnomalyReason(reason) {
+    if (reason === "Z") return t("anomalyZ");
+    if (reason === "IQR") return t("anomalyIqr");
+    if (reason === "STRAIGHT") return t("anomalyStraight");
+    if (reason === "ATTENTION") return t("anomalyAttention");
+    if (reason.startsWith("RANGE:")) { const p=reason.split(":"); return `${t("anomalyRange")} [${p[1]}, ${p[2]}]`; }
+    return reason;
+  }
+  function parseWorkbook(arrayBuffer, filename) {
+    const wb = XLSX.read(arrayBuffer, { type: "array", raw: true });
+    const sheet = wb.Sheets[wb.SheetNames[0]]; const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
+    if (!rows.length || rows[0].length < 212) throw new Error(`数据列数不足：检测到 ${rows[0]?.length || 0} 列，必须至少 212 列。`);
+    const headers = rows[0].map(x => String(x ?? "").trim());
+    if (headers[COL.attention] !== "controllo2" || headers[COL.epq1] !== "EPI_1") throw new Error(`结构校验失败：第 185 列应为 controllo2（实际为 ${headers[COL.attention] || "空"}），第 130 列应为 EPI_1（实际为 ${headers[COL.epq1] || "空"}）。请确认文件是否包含第 1 行变量名、第 2 行题干。`);
+    const data = rows.slice(2).filter(row => row.some(v => v !== null && v !== ""));
+    if (!data.length) throw new Error("没有找到第 3 行起的有效答卷数据。");
+    state.rows = data; state.config = state.config || buildDefaultConfig(); state.records = data.map((row, i) => makeRecord(row, i, state.config)); addAnomalies();
+    showNotice(esc(t("loadedMessage").replace("{file}", filename).replace("{n}", state.records.length).replace("{cols}", headers.length)), "ok");
+    buildFilters(); renderTabs(); render();
+  }
+  function buildFilters() {
+    const oldSelections={}; ["filter-id","filter-gender","filter-school","filter-region","filter-province"].forEach(id=>oldSelections[id]=selectedValues(id));
+    const ids = state.records.map(r=>r.id), genders = [...new Set(state.records.map(r=>r.gender))], schools=[...new Set(state.records.map(r=>r.school))], regions=[...new Set(state.records.map(r=>r.region))], provinces=[...new Set(state.records.map(r=>r.province))];
+    const cfu = state.records.map(r=>r.cfu).filter(Number.isFinite); const min = cfu.length ? Math.floor(Math.min(...cfu)) : 0, max=cfu.length?Math.ceil(Math.max(...cfu)):120;
+    $("#filter-fields").innerHTML = `
+      <details open><summary>${t("population")}</summary>
+        ${multiField("filter-id", t("id"), ids)}
+        ${multiField("filter-gender", t("gender"), genders)}
+        ${multiField("filter-school", t("school"), schools)}
+        ${multiField("filter-region", t("region"), regions)}
+        ${multiField("filter-province", t("province"), provinces)}
+      </details>
+      <details open><summary>${t("numeric")}</summary>
+        <div class="field"><label>${t("cfu")}</label><div class="range-row"><input id="filter-cfu-min" type="number" value="${min}" min="${min}" max="${max}"><input id="filter-cfu-max" type="number" value="${max}" min="${min}" max="${max}"></div><small>${t("min")} / ${t("max")}</small></div>
+      </details>
+      <details open><summary>${t("quality")}</summary>
+        <label class="check"><input id="filter-attention" type="checkbox"><span>${t("attention")}</span></label>
+        <label class="check"><input id="filter-anomaly" type="checkbox"><span>${t("anomalyOnly")}</span></label>
+      </details>
+      <p class="muted" style="font-size:12px">${t("help")}</p>
+      <button class="btn primary" id="apply-filters" type="button">${t("apply")}</button>
+      <button class="btn" id="clear-filters" type="button">${t("clear")}</button>`;
+    Object.entries(oldSelections).forEach(([id,values])=>{const el=$("#"+id);if(el)Array.from(el.options).forEach(o=>o.selected=values.includes(o.value));});
+    $("#apply-filters").addEventListener("click", () => { state.selectedPerson=null; render(); });
+    $("#clear-filters").addEventListener("click", () => { $$("#filter-fields select").forEach(s=>Array.from(s.options).forEach(o=>o.selected=false)); $("#filter-cfu-min").value=min; $("#filter-cfu-max").value=max; $("#filter-attention").checked=false; $("#filter-anomaly").checked=false; render(); });
+  }
+  function multiField(id, label, values) { return `<div class="field"><label for="${id}">${esc(label)}</label><select id="${id}" multiple>${values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("")}</select><small>${t("selectHelp")}</small></div>`; }
+  function selectedValues(id) { const el=$("#"+id); return el ? Array.from(el.selectedOptions).map(o=>o.value) : []; }
+  function getFiltered() {
+    if (!state.records.length) return [];
+    const ids=selectedValues("filter-id"), genders=selectedValues("filter-gender"), schools=selectedValues("filter-school"), regions=selectedValues("filter-region"), provinces=selectedValues("filter-province");
+    const min=num($("#filter-cfu-min")?.value), max=num($("#filter-cfu-max")?.value), exclude=$("#filter-attention")?.checked, only=$("#filter-anomaly")?.checked;
+    return state.records.filter(r => (!ids.length||ids.includes(r.id)) && (!genders.length||genders.includes(r.gender)) && (!schools.length||schools.includes(r.school)) && (!regions.length||regions.includes(r.region)) && (!provinces.length||provinces.includes(r.province)) && (!Number.isFinite(r.cfu)||(!Number.isFinite(min)||r.cfu>=min)&&(!Number.isFinite(max)||r.cfu<=max)) && (!exclude||!r.attentionFail) && (!only||r.hasAnomaly));
+  }
+  function renderTabs() {
+    const fixed = [{id:"all",label:t("overview")}, {id:"scales",label:t("scales")}, {id:"stats",label:t("stats")},{id:"visuals",label:tx("visuals")},{id:"rules",label:t("rules")}];
+    $("#tabs").innerHTML = fixed.map(t=>`<button class="tab ${state.tab===t.id?"active":""}" data-tab="${esc(t.id)}" type="button">${esc(t.label)}</button>`).join("");
+    $$("#tabs .tab").forEach(b=>b.addEventListener("click",()=>{state.tab=b.dataset.tab; renderTabs(); render();}));
+  }
+  function factorKey(scale, factor) { return `${scale.id}::${factor.id}`; }
+  function filterSummary() {
+    const parts=[]; const labels=[["filter-id",t("id")],["filter-gender",t("gender")],["filter-school",t("school")],["filter-region",t("region")],["filter-province",t("province")]];
+    labels.forEach(([id,label])=>{const values=selectedValues(id);if(values.length)parts.push(`${label}: ${values.slice(0,3).join(", ")}${values.length>3?" …":""}`);});
+    const min=num($("#filter-cfu-min")?.value), max=num($("#filter-cfu-max")?.value); if(Number.isFinite(min)&&Number.isFinite(max)&&state.records.some(r=>Number.isFinite(r.cfu))){const all=state.records.map(r=>r.cfu).filter(Number.isFinite);if(min>Math.min(...all)||max<Math.max(...all))parts.push(`${t("cfu")}: ${min}–${max}`);}
+    if($("#filter-attention")?.checked)parts.push(t("attention")); if($("#filter-anomaly")?.checked)parts.push(t("anomalyOnly"));
+    return parts.length ? parts.join(" · ") : `${t("current")}: ${t("allParticipants")}`;
+  }
+  function scoreCell(r, scale, factor) {
+    const key=factorKey(scale,factor), v=r.scores[key], reasons=r.factorReasons[key]||[]; let cls="", title=reasons.join("；");
+    if (reasons.some(x=>x==="Z"||x.startsWith("RANGE:"))) cls="cell-red"; else if (reasons.some(x=>x==="IQR")) cls="cell-yellow"; else if (reasons.length) cls="cell-purple";
+    title=reasons.map(formatAnomalyReason).join("; ");
+    return `<td class="score ${cls}" title="${esc(title)}">${fmt(v)}${reasons.length?" ⚠":""}</td>`;
+  }
+  function tableFor(records, scales) {
+    const factors=scales.flatMap(s=>s.factors.map(f=>({s,f}))); if (!records.length) return `<div class="empty">${t("noData")}: 0</div>`;
+    const headers=[t("id"),t("gender"),t("school"),t("region"),t("province"),"CFU",...factors.map(x=>factorLabel(x.s,x.f))];
+    const rows=records.map(r=>`<tr><td><button class="person-link" data-person="${esc(r.id)}">${esc(r.id)}</button>${r.hasAnomaly?`<span class="badge red">${t("anomalyBadge")}</span>`:""}</td><td>${esc(r.gender)}</td><td>${esc(r.school)}</td><td>${esc(r.region)}</td><td>${esc(r.province)}</td><td class="score">${fmt(r.cfu,0)}</td>${factors.map(x=>scoreCell(r,x.s,x.f)).join("")}</tr>`).join("");
+    state.copiedText=[headers.join("\t"), ...records.map(r=>[r.id,r.gender,r.school,r.region,r.province,Number.isFinite(r.cfu)?r.cfu:"",...factors.map(x=>r.scores[factorKey(x.s,x.f)]??"")].join("\t"))].join("\n");
+    return `<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div><div class="legend"><span>${t("anomalyLegend")}</span></div>`;
+  }
+  function renderPersonDetail() {
+    if (!state.selectedPerson) return ""; const r=state.records.find(x=>x.id===state.selectedPerson); if (!r) return "";
+    const cells=state.config.scales.flatMap(s=>s.factors.map(f=>`<div class="detail-item"><span>${esc(scaleLabel(s))} · ${esc(factorLabel(s,f))}</span><b>${fmt(r.scores[factorKey(s,f)])}</b></div>`)).join("");
+    return `<div class="detail"><div class="toolbar"><b>${esc(r.id)} · ${t("allRespondents")}</b><button class="btn" id="close-detail" type="button">${t("close")}</button></div><div class="detail-grid"><div class="detail-item"><span>${t("gender")}</span><b>${esc(r.gender)}</b></div><div class="detail-item"><span>${t("school")}</span><b>${esc(r.school)}</b></div><div class="detail-item"><span>${t("region")}</span><b>${esc(r.region)}</b></div><div class="detail-item"><span>${t("province")}</span><b>${esc(r.province)}</b></div><div class="detail-item"><span>CFU</span><b>${fmt(r.cfu,0)}</b></div><div class="detail-item"><span>${t("anomalous")}</span><b>${r.hasAnomaly?t("yes"):t("no")}</b></div></div><h3>${t("factor")}</h3><div class="detail-grid">${cells}</div>${r.anomalyReasons.length?`<p class="notice warn">${esc(r.anomalyReasons.join("; "))}</p>`:""}</div>`;
+  }
+  function renderAll() {
+    if (!state.records.length) { $("#content").innerHTML=`<div class="empty"><h2>${t("noData")}</h2><p>${t("uploadHint")}</p></div>`; return; }
+    const filtered=getFiltered(); state.filtered=filtered; const scales=state.config.scales;
+    const n=filtered.length, anomaly=filtered.filter(r=>r.hasAnomaly).length, attention=filtered.filter(r=>r.attentionFail).length;
+    const cards=scales.map(s=>{const itemsCount=allScaleItems(s).length;const m=mean(filtered.flatMap(r=>s.factors.map(f=>r.scores[factorKey(s,f)])));return `<div class="card"><div class="toolbar"><div><h3 style="margin:0">${esc(scaleLabel(s))}</h3><span class="muted">${s.factors.length} ${t("factorCount")} · ${itemsCount} ${t("itemCount")}</span></div><button class="btn primary open-scale" data-scale="${esc(s.id)}" type="button">${t("open")}</button></div><div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin:10px 0 0"><div class="stat"><span>${t("sample")}</span><b>${n}</b></div><div class="stat"><span>${t("scaleMean")}</span><b>${fmt(m)}</b></div><div class="stat"><span>${t("anomalous")}</span><b>${filtered.filter(r=>r.factorReasons && s.factors.some(f=>(r.factorReasons[factorKey(s,f)]||[]).length)).length}</b></div></div></div>`;}).join("");
+    $("#content").innerHTML=`<h2>${t("overview")}</h2><p class="panel-subtitle">${t("current")}: <b>${esc(filterSummary())}</b></p><div class="stats-grid"><div class="stat"><span>${t("sample")}</span><b>${n}</b></div><div class="stat"><span>${t("anomalous")}</span><b>${anomaly}</b></div><div class="stat"><span>${t("attentionFail")}</span><b>${attention}</b></div><div class="stat"><span>${t("scaleCount")}</span><b>${scales.length}</b></div></div><h3>${t("scales")}</h3><div style="display:grid;gap:12px">${cards}</div>${renderPersonDetail()}`;
+    $$(".open-scale").forEach(b=>b.addEventListener("click",()=>{state.selectedScale=b.dataset.scale;state.tab="scales";renderTabs();render();})); bindTableActions();
+  }
+  function questionTable(scale) {
+    const rows=scale.factors.flatMap(f=>f.items.map(item=>`<tr><td>${esc(factorLabel(scale,f))}</td><td>${esc(item.q)}</td><td class="code">${item.col}</td><td>${esc(excelColumn(item.col+1))}</td><td>${item.reverse?t("yes"):t("no")}</td><td>${f.min}–${f.max}</td><td>${f.method===`mean`?t("mean"):t("sum")}</td></tr>`)).join("");
+    return `<div class="table-wrap"><table><thead><tr><th>${t("factor")}</th><th>${t("questionHeader")}</th><th>${t("columnHeader")}</th><th>${t("excelHeader")}</th><th>${t("reverse")}</th><th>${t("range")}</th><th>${t("method")}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  function excelColumn(n) { let s="";while(n>0){const r=(n-1)%26;s=String.fromCharCode(65+r)+s;n=Math.floor((n-1)/26);}return s; }
+  function renderScalesPage() {
+    const scale=state.config.scales.find(s=>s.id===state.selectedScale)||state.config.scales[0]; state.selectedScale=scale.id; renderScale(scale);
+  }
+  function renderScale(scale) {
+    const filtered=getFiltered(); const sums=scale.factors.map(f=>`<span>${esc(factorLabel(scale,f))}: ${fmt(mean(filtered.map(r=>r.scores[factorKey(scale,f)])))}</span>`).join(" · ");
+    const picker=state.config.scales.map(s=>`<option value="${esc(s.id)}" ${s.id===scale.id?"selected":""}>${esc(scaleLabel(s))}</option>`).join("");
+    $("#content").innerHTML=`<h2>${esc(scaleLabel(scale))}</h2><p class="panel-subtitle">${t("current")}: <b>${esc(filterSummary())}</b></p><div class="toolbar"><div class="field" style="min-width:280px;margin:0"><label>${t("scales")}</label><select id="scale-picker">${picker}</select></div><button class="btn" id="copy-btn" type="button">${t("copy")}</button></div><div class="stats-grid"><div class="stat"><span>${t("sample")}</span><b>${filtered.length}</b></div><div class="stat"><span>${t("factorCount")}</span><b>${scale.factors.length}</b></div><div class="stat"><span>${t("itemCount")}</span><b>${allScaleItems(scale).length}</b></div><div class="stat"><span>${t("alpha")}</span><b>${fmt(mean(scale.factors.map(f=>cronbachAlpha(filtered,scale,f))),3)}</b></div></div><div class="card"><h3>${t("factor")}</h3><p>${t("factorExplain")}</p><p class="muted">${scale.factors.map(f=>`${esc(factorLabel(scale,f))}: ${f.items.length} ${t("itemCount")} · ${f.method===`mean`?t("mean"):t("sum")}`).join(" · ")}</p></div><div class="card" style="margin-top:15px"><h3>${t("questions")}</h3>${questionTable(scale)}</div><div class="card" style="margin-top:15px"><h3>${t("participantData")}</h3><p class="muted">${sums}</p>${tableFor(filtered,[scale])}</div>${renderPersonDetail()}`;
+    $("#scale-picker").addEventListener("change",e=>{state.selectedScale=e.target.value;render();}); bindTableActions();
+  }
+  function bindTableActions() { $$(".person-link").forEach(b=>b.addEventListener("click",()=>{state.selectedPerson=b.dataset.person; render();})); $("#close-detail")?.addEventListener("click",()=>{state.selectedPerson=null; render();}); $("#copy-btn")?.addEventListener("click",copyCurrentTable); }
+  function render() { if (!state.config) state.config=buildDefaultConfig(); if (state.tab==="rules") renderRulesClean(); else if (state.tab==="stats") renderStats(); else if (state.tab==="visuals") renderVisuals(); else if (state.tab==="scales") renderScalesPage(); else renderAll(); }
+
+  function cronbachAlpha(records, scale, factor) {
+    const rows=records.map(r=>{const d=r.details[factorKey(scale,factor)]; return d ? d.recoded : [];}).filter(x=>x.length===factor.items.length && x.every(Number.isFinite));
+    const k=factor.items.length; if(k<2||rows.length<2)return NaN; const totals=rows.map(x=>x.reduce((a,b)=>a+b,0)); const totalVar=variance(totals), itemVar=factor.items.map((_,i)=>variance(rows.map(x=>x[i]))).reduce((a,b)=>a+b,0); return totalVar>0 ? k/(k-1)*(1-itemVar/totalVar) : NaN;
+  }
+  function variance(values) { const x=values.filter(Number.isFinite); if(x.length<2)return NaN; const m=mean(x); return x.reduce((s,v)=>s+(v-m)**2,0)/(x.length-1); }
+  function statsRows(records) { return state.config.scales.flatMap(scale=>scale.factors.map(f=>{const vals=records.map(r=>r.scores[factorKey(scale,f)]).filter(Number.isFinite); return {scale:scaleLabel(scale),factor:factorLabel(scale,f),n:vals.length,mean:mean(vals),sd:Math.sqrt(variance(vals)),median:quantile(vals,.5),min:vals.length?Math.min(...vals):NaN,max:vals.length?Math.max(...vals):NaN,alpha:cronbachAlpha(records,scale,f)};})); }
+  function renderStats() {
+    const records=getFiltered(), rows=statsRows(records); const body=rows.map(x=>`<tr><td>${esc(x.scale)}</td><td>${esc(x.factor)}</td><td class="score">${x.n}</td><td class="score">${fmt(x.mean)}</td><td class="score">${fmt(x.sd)}</td><td class="score">${fmt(x.median)}</td><td class="score">${fmt(x.min)}</td><td class="score">${fmt(x.max)}</td><td class="score">${fmt(x.alpha,3)}</td></tr>`).join("");
+    $("#content").innerHTML=`<h2>${t("stats")}</h2><p class="panel-subtitle">${t("current")}: <b>${esc(filterSummary())}</b><br>${t("sampleNote")}</p><div class="stats-grid"><div class="stat"><span>${t("sample")}</span><b>${records.length}</b></div><div class="stat"><span>${t("cfuMean")}</span><b>${fmt(mean(records.map(r=>r.cfu)),0)}</b></div><div class="stat"><span>${t("anomalous")}</span><b>${records.filter(r=>r.hasAnomaly).length}</b></div><div class="stat"><span>${t("attentionFail")}</span><b>${records.length?fmt(100*records.filter(r=>!r.attentionFail).length/records.length,1)+"%":"—"}</b></div></div><div class="card"><h3>${t("anomalyTitle")}</h3><ul><li>${t("anomalyZ")}</li><li>${t("anomalyIqr")}</li><li>${t("anomalyRange")}</li><li>${t("anomalyStraight")}</li><li>${t("anomalyAttention")}</li></ul><p class="muted">${t("anomalyLegend")}</p></div><h3>${t("descriptive")}</h3><div class="table-wrap"><table><thead><tr><th>${t("scaleHeader")}</th><th>${t("factor")}</th><th>${t("nHeader")}</th><th>${t("meanHeader")}</th><th>${t("sdHeader")}</th><th>${t("medianHeader")}</th><th>${t("minHeader")}</th><th>${t("maxHeader")}</th><th>${t("alpha")}</th></tr></thead><tbody>${body}</tbody></table></div><h3>${t("stats")}</h3>${analysisCards(records)}`;
+    bindAnalysisActions(records);
+  }
+
+  /* Numerical functions for two-sided Pearson p-values without another CDN. */
+  function logGamma(z) { const c=[676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-.13857109526572012,9.984369578019572e-6,1.5056327351493116e-7]; if(z<.5)return Math.log(Math.PI)-Math.log(Math.sin(Math.PI*z))-logGamma(1-z); z-=1; let x=.9999999999998099; c.forEach((v,i)=>x+=v/(z+i+1)); const t=z+c.length-.5; return .5*Math.log(2*Math.PI)+(z+.5)*Math.log(t)-t+Math.log(x); }
+  function betaCF(a,b,x) { let qab=a+b,qap=a+1,qam=a-1,c=1,d=1-qab*x/qap; if(Math.abs(d)<3e-30)d=3e-30; d=1/d; let h=d; for(let m=1;m<=200;m++){let m2=2*m,aa=m*(b-m)*x/((qam+m2)*(a+m2)); d=1+aa*d;if(Math.abs(d)<3e-30)d=3e-30;c=1+aa/c;if(Math.abs(c)<3e-30)c=3e-30;d=1/d;h*=d*c;aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2));d=1+aa*d;if(Math.abs(d)<3e-30)d=3e-30;c=1+aa/c;if(Math.abs(c)<3e-30)c=3e-30;d=1/d;const del=d*c;h*=del;if(Math.abs(del-1)<3e-7)break;}return h; }
+  function regBeta(x,a,b) { if(x<=0)return 0;if(x>=1)return 1;const bt=Math.exp(logGamma(a+b)-logGamma(a)-logGamma(b)+a*Math.log(x)+b*Math.log(1-x));return x<(a+1)/(a+b+2)?bt*betaCF(a,b,x)/a:1-bt*betaCF(b,a,1-x)/b; }
+  function studentTCDF(t,df) { if(!Number.isFinite(t))return t<0?0:1; const x=df/(df+t*t), ib=regBeta(x,df/2,.5); return t>=0?1-.5*ib:.5*ib; }
+  function pearson(x,y) { const pairs=x.map((v,i)=>[v,y[i]]).filter(p=>Number.isFinite(p[0])&&Number.isFinite(p[1])); const n=pairs.length;if(n<3)return {r:NaN,p:NaN,n};const a=pairs.map(p=>p[0]),b=pairs.map(p=>p[1]),ma=mean(a),mb=mean(b),numr=a.reduce((s,v,i)=>s+(v-ma)*(b[i]-mb),0),den=Math.sqrt(a.reduce((s,v)=>s+(v-ma)**2,0)*b.reduce((s,v)=>s+(v-mb)**2,0)),r=den?numr/den:NaN;const t=Number.isFinite(r)&&Math.abs(r)<1?Math.abs(r)*Math.sqrt((n-2)/(1-r*r)):Infinity;return {r,p:Number.isFinite(t)?2*(1-studentTCDF(t,n-2)):0,n}; }
+  function analysisCards(records) {
+    const factors=state.config.scales.flatMap(s=>s.factors.map(f=>({s,f,key:factorKey(s,f),label:`${scaleLabel(s)} · ${factorLabel(s,f)}`}))); if(factors.length<2)return "";
+    return `<div class="two-col"><div class="card"><h3>${t("corr")}</h3><div class="field"><label>${t("factorX")}</label><select id="corr-x">${factors.map((x,i)=>`<option value="${i}">${esc(x.label)}</option>`).join("")}</select></div><div class="field"><label>${t("factorY")}</label><select id="corr-y">${factors.map((x,i)=>`<option value="${i}" ${i===1?"selected":""}>${esc(x.label)}</option>`).join("")}</select></div><div id="corr-result" class="result muted">${t("chooseFactors")}</div></div><div class="card"><h3>${t("ttest")}</h3><div class="field"><label>${t("group")}</label><select id="ttest-group"><option value="gender">${t("gender")}</option><option value="veneto">${t("venetoGroup")}</option><option value="school">${t("school")}</option></select></div><div class="field"><label>${t("outcome")}</label><select id="ttest-outcome">${factors.map((x,i)=>`<option value="${i}">${esc(x.label)}</option>`).join("")}</select></div><div class="two-col"><div class="field"><label>${t("groupA")}</label><select id="ttest-a"></select></div><div class="field"><label>${t("groupB")}</label><select id="ttest-b"></select></div></div><div id="ttest-result" class="result muted">${t("chooseFactors")}</div></div></div><div class="card" style="margin-top:15px"><h3>${t("frequency")}</h3>${frequencyTable(records)}</div>`;
+  }
+  function frequencyTable(records) { const groups=[[t("gender"),r=>r.gender],[t("school"),r=>r.school],[t("region"),r=>r.region]]; return `<div class="two-col">${groups.map(([label,fn])=>{const c={};records.forEach(r=>{const k=fn(r);c[k]=(c[k]||0)+1;});return `<div><b>${label}</b><table><tbody>${Object.entries(c).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="score">${v}</td></tr>`).join("")}</tbody></table></div>`;}).join("")}</div>`; }
+  function groupLabels(records, groupType) { const labels=new Set(); const nonVeneto=t("venetoGroup").split(" / ")[1]; records.forEach(r=>labels.add(groupType==="gender"?r.gender:groupType==="school"?r.school:(r.regionCode===20?"Veneto":nonVeneto))); return [...labels]; }
+  function welch(records, groupType, outcome, selectedA, selectedB) {
+    const groups={}; const nonVeneto=t("venetoGroup").split(" / ")[1]; records.forEach(r=>{const g=groupType==="gender"?r.gender:groupType==="school"?r.school:(r.regionCode===20?"Veneto":nonVeneto);const v=r.scores[outcome.key];if(Number.isFinite(v)){groups[g]??=[];groups[g].push(v);}}); const names=[selectedA,selectedB]; if(!names[0]||!names[1]||names[0]===names[1])return {errorKey:"chooseDifferent",groups}; if(!groups[names[0]]||!groups[names[1]])return {errorKey:"noGroupData",groups}; if(groups[names[0]].length<2||groups[names[1]].length<2)return {errorKey:"minGroupN",args:{a:names[0],na:groups[names[0]].length,b:names[1],nb:groups[names[1]].length},groups}; const [a,b]=names.map(n=>groups[n]),ma=mean(a),mb=mean(b),va=variance(a),vb=variance(b),se=Math.sqrt(va/a.length+vb/b.length); if(!Number.isFinite(se)||se===0)return {errorKey:"zeroVariance",groups}; const t=(ma-mb)/se,df=(va/a.length+vb/b.length)**2/((va*va)/(a.length*a.length*(a.length-1))+(vb*vb)/(b.length*b.length*(b.length-1))),p=2*(1-studentTCDF(Math.abs(t),df)),pooled=Math.sqrt(((a.length-1)*va+(b.length-1)*vb)/(a.length+b.length-2)); return {names,a,b,ma,mb,sa:Math.sqrt(va),sb:Math.sqrt(vb),t,df,p,d:pooled?(ma-mb)/pooled:NaN}; }
+  function bindAnalysisActions(records) { const factors=state.config.scales.flatMap(s=>s.factors.map(f=>({s,f,key:factorKey(s,f),label:`${scaleLabel(s)} · ${factorLabel(s,f)}`}))); const corr=()=>{const x=factors[Number($("#corr-x").value)],y=factors[Number($("#corr-y").value)],res=pearson(records.map(r=>r.scores[x.key]),records.map(r=>r.scores[y.key])); $("#corr-result").innerHTML=`<b>r = ${fmt(res.r)}</b> · n = ${res.n} · ${t("twoSidedP")} = ${fmt(res.p,4)}${res.n<3?`<br>${t("validPairs")}: ${t("tooFewPairs")}`:""}`;}; const refreshGroups=()=>{const labels=groupLabels(records,$("#ttest-group").value); $("#ttest-a").innerHTML=labels.map((x,i)=>`<option value="${esc(x)}">${esc(x)}</option>`).join(""); $("#ttest-b").innerHTML=labels.map((x,i)=>`<option value="${esc(x)}" ${i===1?"selected":""}>${esc(x)}</option>`).join(""); tt();}; const tt=()=>{const out=factors[Number($("#ttest-outcome").value)],res=welch(records,$("#ttest-group").value,out,$("#ttest-a").value,$("#ttest-b").value); let error=""; if(res.errorKey){error=t(res.errorKey);if(res.args)Object.entries(res.args).forEach(([k,v])=>{error=error.replace(`{${k}}`,v);});} $("#ttest-result").innerHTML=error?`<span class="notice warn">${esc(error)}</span>`:`<b>${esc(res.names[0])}</b>: M=${fmt(res.ma)}, SD=${fmt(res.sa)}, n=${res.a.length}<br><b>${esc(res.names[1])}</b>: M=${fmt(res.mb)}, SD=${fmt(res.sb)}, n=${res.b.length}<br>t = ${fmt(res.t)} · df = ${fmt(res.df)} · p = ${fmt(res.p,4)} · Cohen d = ${fmt(res.d)}`;}; $("#corr-x")?.addEventListener("change",corr);$("#corr-y")?.addEventListener("change",corr);$("#ttest-group")?.addEventListener("change",refreshGroups);$("#ttest-outcome")?.addEventListener("change",tt);$("#ttest-a")?.addEventListener("change",tt);$("#ttest-b")?.addEventListener("change",tt);corr();refreshGroups(); }
+
+  function configForEditor() {
+    const cfg=JSON.parse(JSON.stringify(state.config));
+    cfg.missing_rule=tx("rulesMissingDetail"); cfg.province_normalization=tx("rulesProvinceDetail");
+    cfg.codebooks=cfg.codebooks||{}; cfg.codebooks.gender={1:tx("codeMale"),2:tx("codeFemale"),3:tx("codeOther")}; cfg.codebooks.school={1:tx("codeSchool1"),2:tx("codeSchool2"),3:tx("codeSchool3")}; cfg.codebooks.region={...(cfg.codebooks.region||{}),21:tx("codeAbroad")};
+    cfg.scales=cfg.scales.map(s=>({...s,label:scaleLabel(s),factors:s.factors.map(f=>({...f,label:factorLabel(s,f)}))}));
+    return cfg;
+  }
+  function visualizationData(scale, factors, view, personId) {
+    const records=view==="person" ? state.records.filter(r=>r.id===personId) : getFiltered();
+    return factors.map(f=>{const values=records.map(r=>r.scores[factorKey(scale,f)]).filter(Number.isFinite);return {factor:f,label:factorLabel(scale,f),value:mean(values),n:values.length,min:f.min,max:f.max};}).filter(x=>Number.isFinite(x.value));
+  }
+  function visualizationSvg(data, chartType) {
+    if(!data.length)return `<div class="empty">${tx("visualNoData")}</div>`;
+    const width=820,height=360,left=64,right=22,top=24,bottom=72,plotW=width-left-right,plotH=height-top-bottom;
+    let lo=Math.min(...data.map(d=>Number.isFinite(d.min)?d.min:d.value)),hi=Math.max(...data.map(d=>Number.isFinite(d.max)?d.max:d.value)); if(!Number.isFinite(lo)||!Number.isFinite(hi)){lo=0;hi=1;} if(lo===hi){lo-=1;hi+=1;}
+    const y=v=>top+(hi-v)/(hi-lo)*plotH, base=y(lo), step=plotW/data.length, x=i=>left+step*(i+.5), labels=data.map(d=>d.label.length>18?d.label.slice(0,17)+"…":d.label), ticks=Array.from({length:5},(_,i)=>lo+(hi-lo)*i/4);
+    const grid=ticks.map(v=>`<line class="gridline" x1="${left}" x2="${width-right}" y1="${y(v)}" y2="${y(v)}"></line><text x="${left-9}" y="${y(v)+4}" text-anchor="end">${fmt(v)}</text>`).join("");
+    const marks=chartType==="bar" ? data.map((d,i)=>{const barW=Math.max(18,step*.62),yy=y(d.value),h=Math.abs(base-yy);return `<rect class="bar" x="${x(i)-barW/2}" y="${Math.min(yy,base)}" width="${barW}" height="${Math.max(1,h)}" rx="3"><title>${esc(d.label)}: ${fmt(d.value)} (${tx("visualN")} ${d.n})</title></rect><text x="${x(i)}" y="${height-bottom+17}" text-anchor="end" transform="rotate(-35 ${x(i)} ${height-bottom+17})">${esc(labels[i])}</text><text x="${x(i)}" y="${Math.min(yy,base)-7}" text-anchor="middle">${fmt(d.value)}</text>`;}).join("") : `<polyline class="line" points="${data.map((d,i)=>`${x(i)},${y(d.value)}`).join(" ")}"></polyline>${data.map((d,i)=>`<circle class="point" cx="${x(i)}" cy="${y(d.value)}" r="5"><title>${esc(d.label)}: ${fmt(d.value)} (${tx("visualN")} ${d.n})</title></circle><text x="${x(i)}" y="${height-bottom+17}" text-anchor="end" transform="rotate(-35 ${x(i)} ${height-bottom+17})">${esc(labels[i])}</text><text x="${x(i)}" y="${y(d.value)-10}" text-anchor="middle">${fmt(d.value)}</text>`).join("")}`;
+    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(tx("visualChartTitle"))}"><title>${esc(tx("visualChartTitle"))}</title>${grid}<line class="axisline" x1="${left}" x2="${left}" y1="${top}" y2="${base}"></line><line class="axisline" x1="${left}" x2="${width-right}" y1="${base}" y2="${base}"></line>${marks}<text class="axis-title" data-axis="x" x="${left+plotW/2}" y="${height-8}" text-anchor="middle">${esc(t("factor"))}</text><text class="axis-title" data-axis="y" x="15" y="${top+plotH/2}" text-anchor="middle" transform="rotate(-90 15 ${top+plotH/2})">${esc(tx("visualScore"))}</text></svg>`;
+  }
+  function visualizationTable(scale, data, personId) {
+    if(!data.length||!personId)return ""; const r=state.records.find(x=>x.id===personId); if(!r)return "";
+    const rows=data.map(d=>`<tr><td>${esc(d.label)}</td><td class="score">${fmt(r.scores[factorKey(scale,d.factor)])}</td><td class="score">${d.factor.min}–${d.factor.max}</td></tr>`).join("");
+    return `<div class="card" style="margin-top:15px"><h3>${tx("visualTable")}</h3><div class="table-wrap"><table><thead><tr><th>${t("factor")}</th><th>${tx("visualScore")}</th><th>${t("range")}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }
+  function renderVisuals() {
+    if(!state.records.length){$("#content").innerHTML=`<div class="empty"><h2>${tx("visualTitle")}</h2><p>${t("uploadHint")}</p></div>`;return;}
+    const scale=state.config.scales.find(s=>s.id===state.vizScale)||state.config.scales[0]; state.vizScale=scale.id;
+    const person=state.records.find(r=>r.id===state.vizPerson)||state.records[0]; state.vizPerson=person.id;
+    const factorIds=scale.factors.map(f=>f.id); state.vizFactors=state.vizFactors.filter(id=>factorIds.includes(id)); if(!state.vizFactors.length)state.vizFactors=[...factorIds];
+    const scaleOptions=state.config.scales.map(s=>`<option value="${esc(s.id)}" ${s.id===scale.id?"selected":""}>${esc(scaleLabel(s))}</option>`).join("");
+    const personOptions=state.records.map(r=>`<option value="${esc(r.id)}" ${r.id===person.id?"selected":""}>${esc(r.id)}</option>`).join("");
+    const factorOptions=scale.factors.map(f=>`<option value="${esc(f.id)}" ${state.vizFactors.includes(f.id)?"selected":""}>${esc(factorLabel(scale,f))}</option>`).join("");
+    $("#content").innerHTML=`<h2>${tx("visualTitle")}</h2><p class="panel-subtitle">${tx("visualSubtitle")}</p><div class="card"><div class="viz-controls"><div class="field"><label>${tx("visualView")}</label><select id="viz-view"><option value="group" ${state.vizView==="group"?"selected":""}>${tx("visualGroup")}</option><option value="person" ${state.vizView==="person"?"selected":""}>${tx("visualPerson")}</option></select></div><div class="field"><label>${tx("visualScale")}</label><select id="viz-scale">${scaleOptions}</select></div><div class="field"><label>${tx("visualChart")}</label><select id="viz-chart"><option value="bar" ${state.vizChart==="bar"?"selected":""}>${tx("visualBar")}</option><option value="line" ${state.vizChart==="line"?"selected":""}>${tx("visualLine")}</option></select></div><div class="field" id="viz-person-field"><label>${tx("visualPersonId")}</label><select id="viz-person">${personOptions}</select></div><div class="field"><label>${tx("visualFactors")}</label><select id="viz-factors" multiple>${factorOptions}</select></div><button class="btn primary" id="viz-generate" type="button">${tx("visualGenerate")}</button></div><div id="viz-output" class="viz-chart" aria-live="polite"></div><p id="viz-caption" class="viz-caption"></p></div><div id="viz-table"></div>`;
+    const draw=()=>{const selected=selectedValues("viz-factors");state.vizFactors=selected.length?selected:[];const chosen=scale.factors.filter(f=>state.vizFactors.includes(f.id));const data=visualizationData(scale,chosen,state.vizView,$("#viz-person").value);$("#viz-output").innerHTML=visualizationSvg(data,state.vizChart);$("#viz-caption").textContent=state.vizView==="group"?`${tx("visualGroupNote")} ${tx("visualN")}: ${getFiltered().length}`:tx("visualPersonNote");$("#viz-table").innerHTML=state.vizView==="person"?visualizationTable(scale,data,$("#viz-person").value):"";};
+    const updatePerson=()=>{$("#viz-person-field").style.display=state.vizView==="person"?"block":"none";};
+    $("#viz-view").addEventListener("change",e=>{state.vizView=e.target.value;renderVisuals();}); $("#viz-scale").addEventListener("change",e=>{state.vizScale=e.target.value;state.vizFactors=[];renderVisuals();}); $("#viz-chart").addEventListener("change",e=>{state.vizChart=e.target.value;draw();}); $("#viz-person").addEventListener("change",e=>{state.vizPerson=e.target.value;draw();}); $("#viz-factors").addEventListener("change",draw); $("#viz-generate").addEventListener("click",draw); updatePerson(); draw();
+  }
+  function renderRulesClean() {
+    const editorConfig=configForEditor();
+    $("#content").innerHTML=`<h2>${t("rules")}</h2><p class="panel-subtitle">${t("editable")}</p><div class="two-col"><div><textarea id="config-json">${esc(JSON.stringify(editorConfig,null,2))}</textarea><div class="toolbar"><button class="btn primary" id="apply-config" type="button">${t("applyConfig")}</button><button class="btn" id="download-config" type="button">${t("downloadJson")}</button></div><div id="config-message"></div></div><div class="card"><h3>${t("structure")}</h3><p>${tx("rulesStructureDetail")}</p><h3>${t("formula")}</h3><p><span class="code">min + max − raw</span></p><h3>${t("missing")}</h3><p>${tx("rulesMissingDetail")}</p><h3>${t("examples")}</h3><ol><li>${tx("rulesExample1")}</li><li>${tx("rulesExample2")}</li><li>${tx("rulesExample3")}</li><li>${tx("rulesExample4")}</li></ol><p class="muted">${t("verify")}</p></div></div>`;
+    $("#apply-config").addEventListener("click",()=>{try{const cfg=JSON.parse($("#config-json").value);validateConfig(cfg);state.config=cfg;state.records=state.rows.map((row,i)=>makeRecord(row,i,state.config));addAnomalies();state.selectedPerson=null;buildFilters();renderTabs();render();showNotice(t("configApplied"),"ok");}catch(e){$("#config-message").innerHTML=`<div class="notice error">${t("loadFailed")}: ${esc(localizedError(e.message))}</div>`;}});
+    $("#download-config").addEventListener("click",()=>downloadText(JSON.stringify(editorConfig,null,2),"scoring_config.json","application/json"));
+  }
+  function renderRules() {
+    $("#content").innerHTML=`<h2>${t("rules")}</h2><p class="panel-subtitle">${t("editable")}</p><div class="two-col"><div><textarea id="config-json">${esc(JSON.stringify(state.config,null,2))}</textarea><div class="toolbar"><button class="btn primary" id="apply-config" type="button">${t("applyConfig")}</button><button class="btn" id="download-config" type="button">${t("downloadJson")}</button></div><div id="config-message"></div></div><div class="card"><h3>${t("structure")}</h3><p>0-based column 184: <span class="code">controllo2</span> · 0-based column 129: <span class="code">EPI_1</span>.</p><h3>${t("formula")}</h3><p><span class="code">min + max − raw</span></p><h3>${t("missing")}</h3><p>${esc(state.config.missing_rule || "Missing rate >20%: missing factor score.")}</p><h3>${t("examples")}</h3><ol><li>BFI 1–5: raw 1 on a reverse item → <b>1 + 5 − 1 = 5</b>.</li><li>BIS/BAS 1–4: item 2 raw 1 → <b>4</b>; item 8 is not reverse → <b>1</b>.</li><li>EPQ 0/1: P item 2 raw 1 on a reverse key → <b>0</b>.</li><li>Orientation: columns 116–117 map to Survey; 118–119 map to Route/Visivo.</li></ol><p class="muted">${t("verify")}</p></div></div>`;
+    $("#apply-config").addEventListener("click",()=>{try{const cfg=JSON.parse($("#config-json").value);validateConfig(cfg);state.config=cfg;state.records=state.rows.map((row,i)=>makeRecord(row,i,state.config));addAnomalies();state.selectedPerson=null;buildFilters();renderTabs();render();showNotice(t("configApplied"),"ok");}catch(e){$("#config-message").innerHTML=`<div class="notice error">${t("loadFailed")}: ${esc(localizedError(e.message))}</div>`;}});
+    $("#download-config").addEventListener("click",()=>downloadText(JSON.stringify(state.config,null,2),"scoring_config.json","application/json"));
+  }
+  function downloadText(text, filename, type="text/plain") { try{const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){showNotice(t("downloadBlocked"),"warn");} }
+  async function copyCurrentTable() { try{await navigator.clipboard.writeText(state.copiedText);showNotice(t("copied"),"ok");}catch(e){const ta=document.createElement("textarea");ta.value=state.copiedText;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");showNotice(t("copiedShort"),"ok");}catch(_){showNotice(t("copyFailed"),"warn");}ta.remove();} }
+
+  $("#file-input").addEventListener("change", e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>{try{parseWorkbook(ev.target.result,file.name);}catch(err){showNotice(`<b>${t("loadFailed")}</b>: ${esc(localizedError(err.message))}`,"error");}};reader.readAsArrayBuffer(file);});
+  $("#language-select").addEventListener("change", e=>{lang=e.target.value;applyLanguageChrome();if(state.records.length){addAnomalies();buildFilters();}renderTabs();render();});
+  $("#reset-btn").addEventListener("click",()=>{state.rows=[];state.records=[];state.config=buildDefaultConfig();state.tab="all";state.selectedScale=null;state.selectedPerson=null;$("#filter-fields").innerHTML=`<div class="empty">${t("uploadHint")}</div>`;renderTabs();render();showNotice(""," ");});
+  state.config=buildDefaultConfig(); applyLanguageChrome(); renderTabs(); render();
+  </script>
+</body>
+</html>
